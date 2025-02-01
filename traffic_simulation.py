@@ -31,9 +31,9 @@ YELLOW = (255, 255, 0)
 
 # Add to constants
 MIN_VEHICLE_SPACING = 50  # Minimum space between vehicles
-SIGNAL_MIN_TIME = 30  # Minimum time for a signal phase (seconds)
-SIGNAL_MAX_TIME = 90  # Maximum time for a signal phase (seconds)
-YELLOW_TIME = 3  # seconds for yellow light before changing
+SIGNAL_MIN_TIME = 10  # Minimum time for a signal phase (seconds)
+SIGNAL_MAX_TIME = 45  # Maximum time for a signal phase (seconds)
+YELLOW_TIME = 3      # Yellow light duration (seconds)
 DECORATION_TREES = [(100, 100), (700, 100), (100, 700), (700, 700)]  # Tree positions
 
 # Add new colors
@@ -54,16 +54,16 @@ class TrafficLight:
         self.direction = direction
         self.state = 'red'
         self.timer = 0
-        self.changing = False  # Flag for yellow light state
+        self.changing = False
+        self.time_to_change = 0  # Add countdown timer
         
     def draw(self, screen):
         x, y = self.position
-        # Draw traffic light pole
+        # Draw traffic light pole and box
         pygame.draw.rect(screen, BLACK, (x-5, y-30, 10, 60))
-        # Draw traffic light box
         pygame.draw.rect(screen, BLACK, (x-15, y-30, 30, 90))
         
-        # Draw the lights (red, yellow, green)
+        # Draw the lights
         if self.state == 'red':
             pygame.draw.circle(screen, RED, (x, y-20), 10)
             pygame.draw.circle(screen, BLACK, (x, y), 10)
@@ -76,6 +76,12 @@ class TrafficLight:
             pygame.draw.circle(screen, BLACK, (x, y-20), 10)
             pygame.draw.circle(screen, BLACK, (x, y), 10)
             pygame.draw.circle(screen, GREEN, (x, y+20), 10)
+            
+        # Draw countdown timer
+        font = pygame.font.Font(None, 24)
+        timer_text = f"{int(self.time_to_change)}s"
+        timer_surface = font.render(timer_text, True, BLACK)
+        screen.blit(timer_surface, (x-15, y+40))
 
 def draw_tree(screen, position, size=40):
     x, y = position
@@ -247,65 +253,90 @@ class Simulation:
         
     def calculate_signal_phase(self):
         """Calculate which phase should get green signal based on traffic density and waiting time"""
+        # Handle yellow light transition
         if self.switching_phase:
             current_time = time.time()
             if current_time - self.yellow_start_time >= YELLOW_TIME:
                 self.switching_phase = False
+                self.phase_start_time = current_time
                 # Switch to the opposite phase
                 return 'vertical' if self.current_phase == 'horizontal' else 'horizontal'
             return self.current_phase
 
-        horizontal_count = sum(v['left'] + v['right'] for v in self.vehicle_counts.values())
-        vertical_count = len(self.vehicles) - horizontal_count
+        # Check for emergency vehicles first
+        if self.emergency_vehicles:
+            emergency_phase = self.handle_emergency_vehicle()
+            if emergency_phase != self.current_phase:
+                self.switching_phase = True
+                self.yellow_start_time = time.time()
+            return self.current_phase
+
+        # Count vehicles in each direction
+        horizontal_vehicles = sum(1 for v in self.vehicles if v.direction in ['left', 'right'])
+        vertical_vehicles = sum(1 for v in self.vehicles if v.direction in ['up', 'down'])
         
-        # Calculate total waiting time for each direction
-        horizontal_waiting = 0
-        vertical_waiting = 0
-        for vehicle in self.vehicles:
-            if vehicle.direction in ['left', 'right']:
-                horizontal_waiting += vehicle.waiting_time
-            else:
-                vertical_waiting += vehicle.waiting_time
-        
-        # Calculate scores for each phase
-        horizontal_score = horizontal_count * 1.5 + horizontal_waiting
-        vertical_score = vertical_count * 1.5 + vertical_waiting
-        
+        # Count waiting vehicles
+        horizontal_waiting = sum(1 for v in self.vehicles 
+                               if v.direction in ['left', 'right'] and v.waiting_time > 0)
+        vertical_waiting = sum(1 for v in self.vehicles 
+                                 if v.direction in ['up', 'down'] and v.waiting_time > 0)
+
+        # Calculate priority scores
+        horizontal_score = horizontal_vehicles + (horizontal_waiting * 2)  # Waiting vehicles count double
+        vertical_score = vertical_vehicles + (vertical_waiting * 2)
+
         current_time = time.time()
         phase_duration = current_time - self.phase_start_time
-        
-        # Check if it's time to change signals
+
+        # Determine if we should switch signals
         should_switch = False
-        
+
         # Force switch if maximum time elapsed
         if phase_duration > SIGNAL_MAX_TIME:
             should_switch = True
-        # Switch based on scores and minimum time
+            print("Forcing signal switch due to max time")
+        # Switch based on traffic conditions if minimum time elapsed
         elif phase_duration > SIGNAL_MIN_TIME:
             if self.current_phase == 'horizontal' and vertical_score > horizontal_score * 1.2:
                 should_switch = True
+                print(f"Switching to vertical: {vertical_score} > {horizontal_score}")
             elif self.current_phase == 'vertical' and horizontal_score > vertical_score * 1.2:
                 should_switch = True
-        
+                print(f"Switching to horizontal: {horizontal_score} > {vertical_score}")
+
+        # If should switch, start yellow light phase
         if should_switch and not self.switching_phase:
             self.switching_phase = True
             self.yellow_start_time = current_time
-            
+            print(f"Starting yellow phase at {current_time}")
+
         return self.current_phase
-    
+
     def update_traffic_lights(self):
         try:
-            # Update the current phase
-            self.current_phase = self.calculate_signal_phase()
+            current_time = time.time()
+            phase_duration = current_time - self.phase_start_time
             
-            # Update light states
+            # Calculate time to next change
+            if self.switching_phase:
+                time_to_change = YELLOW_TIME - (current_time - self.yellow_start_time)
+            else:
+                if phase_duration > SIGNAL_MIN_TIME:
+                    time_to_change = SIGNAL_MAX_TIME - phase_duration
+                else:
+                    time_to_change = SIGNAL_MIN_TIME - phase_duration
+            
+            # Update light states and timers
             for light in self.traffic_lights:
                 if self.switching_phase:
                     light.state = 'yellow'
+                    light.time_to_change = time_to_change
                 elif light.direction == self.current_phase:
                     light.state = 'green'
+                    light.time_to_change = time_to_change
                 else:
                     light.state = 'red'
+                    light.time_to_change = time_to_change
                     
         except Exception as e:
             print(f"Error updating traffic lights: {str(e)}")
@@ -458,7 +489,15 @@ class Simulation:
                 'south': sum(1 for v in self.vehicles if v.direction == 'down'),
                 'east': sum(1 for v in self.vehicles if v.direction == 'right'),
                 'west': sum(1 for v in self.vehicles if v.direction == 'left')
-            }
+            },
+            'traffic_lights': [
+                {
+                    'direction': light.direction,
+                    'state': light.state,
+                    'time_to_change': int(light.time_to_change),
+                    'position': 'N/S' if light.direction == 'vertical' else 'E/W'
+                } for light in self.traffic_lights
+            ]
         }
     
     def run(self):

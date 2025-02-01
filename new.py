@@ -178,7 +178,7 @@ def index():
     <!DOCTYPE html>
     <html>
       <head>
-        <title>National Traffic Management System</title>
+        <title>Traffic Management System</title>
         <style>
           body { font-family: Arial, sans-serif; margin: 20px; }
           .stats { 
@@ -219,6 +219,21 @@ def index():
             color: #c62828;
             font-weight: bold;
           }
+          .traffic-lights {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+          }
+          .light-status {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+          }
+          .red { color: #ff0000; }
+          .yellow { color: #ffa500; }
+          .green { color: #008000; }
         </style>
       </head>
       <body>
@@ -228,6 +243,7 @@ def index():
         </div>
         <div class="stats" id="stats"></div>
         <div class="analytics-panel" id="analytics"></div>
+        <div class="traffic-lights" id="trafficLights"></div>
         
         <script>
           function updateAnalytics() {
@@ -293,6 +309,27 @@ def index():
           }
           setInterval(updateStats, 1000);
           updateStats();
+
+          function updateTrafficLights() {
+            fetch('/api/v1/traffic-data')
+              .then(response => response.json())
+              .then(data => {
+                document.getElementById('trafficLights').innerHTML = `
+                  <h2>Traffic Light Status</h2>
+                  ${data.traffic_lights.map(light => `
+                    <div class="light-status">
+                      <h3>${light.position} Traffic Light</h3>
+                      <p class="${light.state}">Current: ${light.state.toUpperCase()}</p>
+                      <p>Time to change: ${light.time_to_change}s</p>
+                    </div>
+                  `).join('')}
+                `;
+              });
+          }
+          
+          // Update every second
+          setInterval(updateTrafficLights, 1000);
+          updateTrafficLights();
         </script>
       </body>
     </html>
